@@ -1,0 +1,96 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+import requests
+import pickle
+
+# 配置web驱动器
+driver = webdriver.Chrome()
+# 设置等待时间
+wait = WebDriverWait(driver, 10)
+
+# 打开IMDb网站并执行搜索功能
+def search_keyword(keyword):
+    driver.get("https://www.imdb.com/")
+    input_element = wait.until(EC.presence_of_element_located((By.ID, "suggestion-search")))
+    input_element.send_keys(keyword + Keys.ENTER)
+
+# 获得详情页和图片链接
+def get_data():
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, "ipc-metadata-list-summary-item")))
+    xpath_expression = '//a[@class="ipc-metadata-list-summary-item__t"]'
+    element = driver.find_element(By.XPATH, xpath_expression)
+    element.click()
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    target_div = soup.find("div", class_="sc-4e4cc5f9-7 joCxEc")
+
+    if target_div:
+        img_element = target_div.find("img")
+        title_element = target_div.find("a", class_="ipc-lockup-overlay ipc-focusable")
+        
+        if img_element and title_element:
+            return driver.current_url, img_element["src"], title_element["aria-label"]
+    elif soup.find("div", class_="ipc-poster"):
+        title_div = soup.find("div", class_="ipc-poster")
+        title = title_div.find("img")['alt']
+
+        # 提取图片链接
+        image_div = soup.find("div", class_="ipc-poster")
+        image_url = image_div.find("img")['src']        
+        return driver.current_url, image_url, title
+    print("未找到目标元素")
+    return None, None, None
+
+# 下载图片
+def download_image(img_url, path):
+    response = requests.get(img_url)
+    if response.status_code == 200:
+        with open(path, 'wb') as f:
+            f.write(response.content)
+        print("图片已成功下载：", path)
+    else:
+        print("下载失败，状态码：", response.status_code)
+
+if __name__ == '__main__':
+    dic = {}
+    keyword_list =['Close Shave, A (1995)', 'Wrong Trousers, The (1993)', 'Some Folks Call It a Sling Blade (1993)', 'Wallace & Gromit: The Best of Aardman Animation (1996)']
+    for keyword in keyword_list:
+        search_keyword(keyword)
+        url, img_url, title = get_data()
+
+        if img_url and title:
+            print("点击后的网址 URL:", url)
+            print("图片链接:", img_url)
+            print("电影名称及演员列表:", title)
+            # 文件名包含字符串，数字容易匹配不到
+            new_word = ''.join(char for char in keyword if char.isalpha())
+            pic_dir = f"pictures/{new_word}.jpg"
+            download_image(img_url, "static/"+pic_dir)
+#             update_file(keyword, [url, pic_dir])
+            dic[keyword] =  [url, pic_dir]
+        
+
+import os
+import pickle
+
+pickle_name = "movie_url_pic.pickle"
+# 检查本地是否存在 movie_url_pic.pickle 文件
+if os.path.exists(pickle_name):
+    # 如果存在，则读取该文件并加载其内容为字典
+    with open(pickle_name, 'rb') as f:
+        movie_url_pic_dict = pickle.load(f)
+else:
+    # 如果不存在，则创建一个空字典
+    movie_url_pic_dict = {}
+
+# 将两个字典融合
+merged_dict = {**movie_url_pic_dict, **dic}
+
+# 输出融合后的字典
+print(merged_dict)
+with open(pickle_name, 'wb') as f:
+    pickle.dump(merged_dict, f)
